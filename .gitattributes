@@ -1,0 +1,2 @@
+agroclima_anual.csv filter=lfs diff=lfs merge=lfs -text
+modelo_anual.json filter=lfs diff=lfs merge=lfs -text

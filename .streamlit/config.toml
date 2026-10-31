@@ -1,0 +1,15 @@
+[theme]
+base = "light"
+primaryColor = "#2e7d32"
+greenColor = "#2e7d32"
+redColor = "#2e7d32"
+baseRadius = "none"
+buttonRadius = "none"
+
+[theme.sidebar]
+backgroundColor = "#2e7d32"
+secondaryBackgroundColor = "#1b5e20"
+textColor = "#ffffff"
+primaryColor = "#ffffff"
+baseRadius = "none"
+buttonRadius = "none"

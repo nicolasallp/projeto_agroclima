@@ -1,0 +1,58 @@
+produto,tipo_lavoura,unidade
+Abacate,Permanente,rendimento/ha
+Algodão arbóreo (em caroço),Permanente,rendimento/ha
+Algodão herbáceo (em caroço),Temporária,rendimento/ha
+Alho,Temporária,rendimento/ha
+Amendoim (em casca),Temporária,rendimento/ha
+Arroz (em casca),Temporária,rendimento/ha
+Aveia (em grão),Temporária,rendimento/ha
+Azeitona,Permanente,rendimento/ha
+Banana (cacho),Permanente,rendimento/ha
+Batata-doce,Temporária,rendimento/ha
+Batata-inglesa,Temporária,rendimento/ha
+Cacau (em amêndoa),Permanente,rendimento/ha
+Café (em grão) Total,Permanente,rendimento/ha
+Cana-de-açúcar,Temporária,rendimento/ha
+Caqui,Permanente,rendimento/ha
+Cebola,Temporária,rendimento/ha
+Centeio (em grão),Temporária,rendimento/ha
+Cevada (em grão),Temporária,rendimento/ha
+Chá-da-índia (folha verde),Permanente,rendimento/ha
+Dendê (cacho de coco),Permanente,rendimento/ha
+Erva-mate (folha verde),Permanente,rendimento/ha
+Ervilha (em grão),Temporária,rendimento/ha
+Fava (em grão),Temporária,rendimento/ha
+Feijão (em grão),Temporária,rendimento/ha
+Figo,Permanente,rendimento/ha
+Fumo (em folha),Temporária,rendimento/ha
+Goiaba,Permanente,rendimento/ha
+Guaraná (semente),Permanente,rendimento/ha
+Juta (fibra),Temporária,rendimento/ha
+Laranja,Permanente,rendimento/ha
+Limão,Permanente,rendimento/ha
+Linho (semente),Temporária,rendimento/ha
+Malva (fibra),Temporária,rendimento/ha
+Mamona (baga),Temporária,rendimento/ha
+Mamão,Permanente,rendimento/ha
+Mandioca,Temporária,rendimento/ha
+Manga,Permanente,rendimento/ha
+Maracujá,Permanente,rendimento/ha
+Marmelo,Permanente,rendimento/ha
+Maçã,Permanente,rendimento/ha
+Melancia,Temporária,rendimento/ha
+Melão,Temporária,rendimento/ha
+Milho (em grão),Temporária,rendimento/ha
+Noz (fruto seco),Permanente,rendimento/ha
+Palmito,Permanente,rendimento/ha
+Pera,Permanente,rendimento/ha
+Pimenta-do-reino,Permanente,rendimento/ha
+Pêssego,Permanente,rendimento/ha
+Rami (fibra),Temporária,rendimento/ha
+Sisal ou agave (fibra),Temporária,rendimento/ha
+Soja (em grão),Temporária,rendimento/ha
+Sorgo (em grão),Temporária,rendimento/ha
+Tangerina,Permanente,rendimento/ha
+Tomate,Temporária,rendimento/ha
+Trigo (em grão),Temporária,rendimento/ha
+Tungue (fruto seco),Permanente,rendimento/ha
+Uva,Permanente,rendimento/ha

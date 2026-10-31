@@ -1,0 +1,33 @@
+Reutilizando C:\Users\nicolas\Documents\FATEC\PI\projeto_agroclima\data\ibge\municipios_ibge.json
+Reutilizando C:\Users\nicolas\Documents\FATEC\PI\projeto_agroclima\data\ibge\malha_municipios_ibge.geojson
+Municípios IBGE: 5571 (sem microrregião, UF via região imediata: 1)
+
+Lendo a base...
+
+== Validação da base (nenhuma linha foi alterada) ==
+Linhas: 1.436.395
+rendimento_ha: nulos=0, infinitos=0, <=0=51
+Nulos nas features: nenhum
+Produtos: 57 | Municípios (cidade, estado): 5545 | Anos: 2000-2024
+
+== Junção base x IBGE ==
+Municípios na base (cidade, estado): 5545
+Casados: 5545 {'nome_normalizado': 5545}
+Da base sem correspondência no IBGE: 0
+Malha final: 5570 feições, 3.6 MB
+Municípios casados sem geometria na malha: 0 []
+Feições da malha sem correspondência na base: 25
+
+== Clima base ==
+Janela: 2015-2024 (10 anos)
+Municípios com clima_base_fallback (sem dados na janela): 34
+
+== Tabelas ==
+municipios: 5545 | produtos: 57 | clima_base: 5545 | combinacoes_validas: 90318 | referencia_produto: 57
+Categorias de 'regiao': base=5 modelo=5 -> IGUAIS
+Categorias de 'estado': base=27 modelo=27 -> IGUAIS
+Categorias de 'cidade': base=5273 modelo=5273 -> IGUAIS
+Categorias de 'tipo_lavoura': base=2 modelo=2 -> IGUAIS
+Categorias de 'produto': base=57 modelo=57 -> IGUAIS
+
+Arquivos gravados em C:\Users\nicolas\Documents\FATEC\PI\projeto_agroclima\data\ref

@@ -1,0 +1,26 @@
+{
+ "chuva_total": {
+  "min": 40.3,
+  "max": 4835.2
+ },
+ "radiacao_solar_total": {
+  "min": 4766.02,
+  "max": 8524.87
+ },
+ "umidade_ar_media": {
+  "min": 45.71,
+  "max": 92.15
+ },
+ "umidade_solo_media": {
+  "min": 0.0,
+  "max": 0.55
+ },
+ "temperatura_solo_media": {
+  "min": 13.34,
+  "max": 34.12
+ },
+ "temperatura_media": {
+  "min": 13.15,
+  "max": 30.09
+ }
+}

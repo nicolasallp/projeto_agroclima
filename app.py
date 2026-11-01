@@ -11,6 +11,7 @@ Rodar:  python build_reference.py  &&  streamlit run app.py
 from __future__ import annotations
 
 import gc
+import importlib
 from typing import Any
 
 import numpy as np
@@ -20,7 +21,19 @@ import streamlit as st
 
 import config
 import geo_utils as geo
+import index_utils
 import model_utils as mu
+
+# Em deploy (Streamlit Cloud), um git push reexecuta app.py sem reiniciar o processo Python,
+# mantendo módulos importados antigos em sys.modules. Recarrega se faltarem atributos novos.
+if not hasattr(config, "NIVEIS_M2") or not hasattr(geo, "figura_mapa_estados"):
+    importlib.reload(config)
+    importlib.reload(index_utils)
+    importlib.reload(geo)
+    importlib.reload(mu)
+    st.cache_resource.clear()
+    st.cache_data.clear()
+
 from index_utils import texto_explicacao_indice
 
 for _opt, _val in (

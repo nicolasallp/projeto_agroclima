@@ -11,8 +11,10 @@ Este módulo não depende do Streamlit; o app envolve as funções com cache.
 
 from __future__ import annotations
 
+import gzip
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -77,9 +79,15 @@ class Referencias:
 
 
 def carregar_modelo(caminho=config.ARQ_MODELO) -> xgb.XGBRegressor:
-    """Carrega o XGBRegressor salvo em JSON."""
+    """Carrega o XGBRegressor (usa o binário compacto .ubj.gz em data/ref/ quando disponível)."""
     modelo = xgb.XGBRegressor()
-    modelo.load_model(str(caminho))
+    caminho_path = Path(caminho)
+    if caminho_path == config.ARQ_MODELO and config.ARQ_MODELO_UBJ.exists():
+        with gzip.open(config.ARQ_MODELO_UBJ, "rb") as f:
+            raw = bytearray(f.read())
+        modelo.load_model(raw)
+    else:
+        modelo.load_model(str(caminho))
     return modelo
 
 
@@ -360,7 +368,12 @@ def validar_ambiente(
         res.erros.append(f"Categóricas no modelo {cat_modelo} diferem das esperadas {sorted(config.CATEGORICAS)}.")
 
     if base is None:
-        base = pd.read_csv(config.ARQ_BASE, encoding="utf-8")
+        base = pd.read_csv(
+            config.ARQ_BASE,
+            encoding="utf-8",
+            usecols=config.FEATURES + [config.ALVO],
+            dtype={c: "category" for c in config.CATEGORICAS},
+        )
 
     # 3. categorias.json
     for c in config.CATEGORICAS:
@@ -381,7 +394,7 @@ def validar_ambiente(
         res.info["categorias_no_modelo"] = False
 
     # 4. Produto -> tipo único
-    tipos_prod = base.groupby("produto")["tipo_lavoura"].nunique()
+    tipos_prod = base.groupby("produto", observed=True)["tipo_lavoura"].nunique()
     ambiguos = tipos_prod[tipos_prod > 1].index.tolist()
     if ambiguos:
         res.erros.append(f"Produtos com mais de um tipo_lavoura na base: {ambiguos}")

@@ -10,6 +10,7 @@ Rodar:  python build_reference.py  &&  streamlit run app.py
 
 from __future__ import annotations
 
+import gc
 from typing import Any
 
 import numpy as np
@@ -184,7 +185,9 @@ def recurso_refs() -> mu.Referencias:
 @st.cache_resource(show_spinner="Verificando o ambiente (features, categorias e teste de fumaça)...")
 def recurso_validacao() -> mu.ResultadoValidacao:
     """Executa ``validar_ambiente`` uma única vez."""
-    return mu.validar_ambiente(recurso_modelo(), recurso_refs())
+    res = mu.validar_ambiente(recurso_modelo(), recurso_refs())
+    gc.collect()
+    return res
 
 
 @st.cache_resource(show_spinner="Carregando a malha municipal...")
@@ -205,7 +208,7 @@ def recurso_nomes_malha() -> pd.DataFrame:
     return pd.read_csv(config.ARQ_NOMES_MALHA, dtype={"codigo_ibge": str}, encoding="utf-8")
 
 
-@st.cache_data(show_spinner="Calculando o mapa...", max_entries=64)
+@st.cache_data(show_spinner="Calculando o mapa...", max_entries=16)
 def cache_mapa(produto: str, ajustes_t: tuple, valor_unico_t: tuple | None) -> pd.DataFrame:
     """Modo 1: predição em lote, cacheada por (produto, ajustes de clima)."""
     return mu.prever_mapa_produto(
@@ -213,7 +216,7 @@ def cache_mapa(produto: str, ajustes_t: tuple, valor_unico_t: tuple | None) -> p
     )
 
 
-@st.cache_data(show_spinner=False, max_entries=64)
+@st.cache_data(show_spinner=False, max_entries=8)
 def cache_figura_mapa(produto: str, ajustes_t: tuple, valor_unico_t: tuple | None, metrica: str) -> go.Figure:
     """Modo 1: figura do mapa (evita reconstruir ao alternar de modo e voltar)."""
     refs = recurso_refs()
@@ -228,13 +231,13 @@ def cache_figura_mapa(produto: str, ajustes_t: tuple, valor_unico_t: tuple | Non
     )
 
 
-@st.cache_data(show_spinner="Calculando o ranking...", max_entries=128)
+@st.cache_data(show_spinner="Calculando o ranking...", max_entries=32)
 def cache_produtos(codigos_t: tuple, ajustes_t: tuple) -> pd.DataFrame:
     """Modo 2: predição de todos os produtos válidos para um ou mais municípios."""
     return mu.prever_produtos_municipios(recurso_modelo(), recurso_refs(), list(codigos_t), dict(ajustes_t))
 
 
-@st.cache_data(show_spinner=False, max_entries=32)
+@st.cache_data(show_spinner=False, max_entries=8)
 def cache_figura_selecao(codigo: str | None, area: tuple) -> tuple[go.Figure, list[list[str]]]:
     """Modo 2: mapa neutro com destaque (reaproveita a figura para a mesma seleção/área)."""
     refs = recurso_refs()

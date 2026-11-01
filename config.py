@@ -25,6 +25,7 @@ ARQ_IBGE_MUNICIPIOS: Path = DIR_IBGE / "municipios_ibge.json"
 ARQ_IBGE_MALHA: Path = DIR_IBGE / "malha_municipios_ibge.geojson"
 
 # Tabelas auxiliares geradas por build_reference.py
+ARQ_MODELO_UBJ: Path = DIR_REF / "modelo_anual.ubj.gz"
 ARQ_MUNICIPIOS: Path = DIR_REF / "municipios.csv"
 ARQ_PRODUTOS: Path = DIR_REF / "produtos.csv"
 ARQ_CLIMA_BASE: Path = DIR_REF / "clima_base.csv"

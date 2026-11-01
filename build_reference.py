@@ -321,12 +321,18 @@ def processar_malha(geo: dict) -> dict:
 
 
 def comparar_categorias_modelo(categorias: dict[str, list[str]]) -> None:
-    """Se o modelo gravar categorias (xgboost >= 3.1), compara com as da base."""
+    """Se o modelo gravar categorias (xgboost >= 3.1), compara com as da base e salva .ubj.gz."""
     try:
+        import gzip
         import xgboost as xgb
 
         booster = xgb.Booster()
         booster.load_model(str(config.ARQ_MODELO))
+        if not config.ARQ_MODELO_UBJ.exists():
+            raw_ubj = booster.save_raw(raw_format="ubj")
+            with gzip.open(config.ARQ_MODELO_UBJ, "wb", compresslevel=6) as f_gz:
+                f_gz.write(raw_ubj)
+            log(f"Modelo compacto gravado em {config.ARQ_MODELO_UBJ.name}")
         cats = dict(booster.get_categories(export_to_arrow=True).to_arrow())
     except Exception as e:  # noqa: BLE001
         log(f"(Não foi possível ler categorias gravadas no modelo: {e})")

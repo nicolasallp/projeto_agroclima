@@ -166,14 +166,54 @@ def test_clique_em_cidade_repetida_usa_codigo(refs):
     nomes = pd.read_csv(config.ARQ_NOMES_MALHA, dtype={"codigo_ibge": str})
     alvo = repetidos.index[1]
     fig, curvas = geo.figura_mapa_selecao(malha, nomes, None, config.CENTRO_BRASIL, 3, "t")
-    idx = curvas[0].index(alvo)
-    customdata = fig.data[0].customdata[idx]
+    curva_i, idx = next((ci, lista.index(alvo)) for ci, lista in enumerate(curvas) if alvo in lista)
+    customdata = fig.data[curva_i].customdata[idx]
     # Evento com customdata
-    assert geo.codigo_do_ponto({"curve_number": 0, "point_index": idx, "customdata": list(customdata)}) == alvo
+    assert geo.codigo_do_ponto({"curve_number": curva_i, "point_index": idx, "customdata": list(customdata)}) == alvo
     # Evento sem customdata: usa point_index na lista de códigos da curva
-    assert geo.codigo_do_ponto({"curve_number": 0, "point_index": idx}, curvas) == alvo
+    assert geo.codigo_do_ponto({"curve_number": curva_i, "point_index": idx}, curvas) == alvo
     # Os dois "Alto Alegre" têm códigos distintos
     assert len(set(repetidos.index)) == len(repetidos)
+
+
+def test_mapas_modo2_tres_niveis_cores_legenda_e_poligonos(refs):
+    malha_mun = geo.carregar_malha(config.ARQ_MALHA)
+    malha_est = geo.carregar_malha(config.ARQ_MALHA_ESTADOS)
+    malha_reg = geo.carregar_malha(config.ARQ_MALHA_REGIOES)
+    nomes = pd.read_csv(config.ARQ_NOMES_MALHA, dtype={"codigo_ibge": str})
+
+    assert len(malha_est["features"]) == 27
+    assert len(malha_reg["features"]) == 5
+
+    fig_c, curvas_c = geo.figura_mapa_selecao(malha_mun, nomes, "3550308", config.CENTRO_BRASIL, 3, "u1")
+    fig_e, curvas_e = geo.figura_mapa_estados(malha_est, "PA", config.CENTRO_BRASIL, 3, "u2")
+    fig_r, curvas_r = geo.figura_mapa_regioes(malha_reg, "Centro-Oeste", config.CENTRO_BRASIL, 3, "u3")
+
+    cores_validas = set(config.CORES_REGIOES.values())
+    for fig, curvas, prop, n_total in (
+        (fig_c, curvas_c, "properties.codigo_ibge", 5570),
+        (fig_e, curvas_e, "properties.uf", 27),
+        (fig_r, curvas_r, "properties.regiao", 5),
+    ):
+        assert fig.layout.legend.itemclick is False
+        assert fig.layout.legend.itemdoubleclick is False
+        assert sum(len(c) for c in curvas) == n_total
+        assert len(fig.data) == len(curvas)
+        for tr, lista in zip(fig.data, curvas):
+            assert tr.featureidkey == prop
+            assert list(tr.locations) == lista
+            assert tr.colorscale[0][1] in cores_validas
+
+
+def test_clique_estado_df_e_acentuado_para(refs):
+    malha_est = geo.carregar_malha(config.ARQ_MALHA_ESTADOS)
+    fig, curvas = geo.figura_mapa_estados(malha_est, None, config.CENTRO_BRASIL, 3, "u")
+    for uf_alvo, reg_esperada in (("DF", "Centro-Oeste"), ("PA", "Norte")):
+        ci, idx = next((i, c.index(uf_alvo)) for i, c in enumerate(curvas) if uf_alvo in c)
+        cd = list(fig.data[ci].customdata[idx])
+        assert geo.codigo_do_ponto({"curve_number": ci, "point_index": idx, "customdata": cd}) == uf_alvo
+        assert geo.codigo_do_ponto({"curve_number": ci, "point_index": idx}, curvas) == uf_alvo
+        assert geo.area_do_clique("Estados", uf_alvo, refs.municipios) == (reg_esperada, uf_alvo)
 
 
 def test_normalizacao():

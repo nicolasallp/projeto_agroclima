@@ -237,12 +237,30 @@ def cache_produtos(codigos_t: tuple, ajustes_t: tuple) -> pd.DataFrame:
     return mu.prever_produtos_municipios(recurso_modelo(), recurso_refs(), list(codigos_t), dict(ajustes_t))
 
 
-@st.cache_data(show_spinner=False, max_entries=8)
-def cache_figura_selecao(codigo: str | None, area: tuple) -> tuple[go.Figure, list[list[str]]]:
-    """Modo 2: mapa neutro com destaque (reaproveita a figura para a mesma seleção/área)."""
+@st.cache_resource(show_spinner=False)
+def recurso_malha_estados() -> dict:
+    """GeoJSON dos 27 estados (dissolvido no build_reference.py)."""
+    return geo.carregar_malha(config.ARQ_MALHA_ESTADOS)
+
+
+@st.cache_resource(show_spinner=False)
+def recurso_malha_regioes() -> dict:
+    """GeoJSON das 5 regiões (dissolvido no build_reference.py)."""
+    return geo.carregar_malha(config.ARQ_MALHA_REGIOES)
+
+
+@st.cache_data(show_spinner=False, max_entries=32)
+def cache_figura_selecao(
+    nivel: str, selecionado: str | None, enquadramento: tuple = (None, None)
+) -> tuple[go.Figure, list[list[str]]]:
+    """Modo 2: mapa colorido por região no nível escolhido, com a seleção destacada.
+
+    ``selecionado``: ``codigo_ibge`` (Cidades), sigla da UF (Estados) ou nome da região (Regiões).
+    ``enquadramento``: ``(regiao, uf)`` que define centro/zoom; muda apenas pelos dropdowns e pela
+    troca de nível, nunca pelo clique no mapa.
+    """
     refs = recurso_refs()
-    regiao, uf = area
-    nomes = recurso_nomes_malha()
+    regiao, uf = enquadramento
     if uf:
         cods = refs.municipios.index[refs.municipios["uf"] == uf]
     elif regiao:
@@ -252,9 +270,12 @@ def cache_figura_selecao(codigo: str | None, area: tuple) -> tuple[go.Figure, li
     bbox = recurso_bbox()
     centro, zoom = geo.centro_zoom(bbox.loc[bbox.index.intersection(cods)]) if len(cods) else (
         dict(config.CENTRO_BRASIL), config.ZOOM_BRASIL)
-    return geo.figura_mapa_selecao(
-        recurso_malha(), nomes, codigo, centro, zoom, uirevision=f"modo2|{regiao}|{uf}"
-    )
+    uirevision = f"modo2|{nivel}|{regiao}|{uf}"
+    if nivel == "Estados":
+        return geo.figura_mapa_estados(recurso_malha_estados(), selecionado, centro, zoom, uirevision)
+    if nivel == "Regiões":
+        return geo.figura_mapa_regioes(recurso_malha_regioes(), selecionado, centro, zoom, uirevision)
+    return geo.figura_mapa_selecao(recurso_malha(), recurso_nomes_malha(), selecionado, centro, zoom, uirevision)
 
 
 # =============================================================================
@@ -447,9 +468,28 @@ def modo_onde_produzir(refs: mu.Referencias) -> None:
 # =============================================================================
 # Modo 2 — O que produzir?
 # =============================================================================
+_CHAVE_MAPA_M2: dict[str, str] = {
+    "Cidades": "m2_mapa_cidades",
+    "Estados": "m2_mapa_estados",
+    "Regiões": "m2_mapa_regioes",
+}
+_TEXTO_TOPO_M2: dict[str, str] = {
+    "Cidades": "Clique em um município no mapa para ver quais produtos têm o maior índice relativo previsto.",
+    "Estados": "Clique em um estado no mapa para ver quais produtos têm o maior índice relativo previsto.",
+    "Regiões": "Clique em uma região no mapa para ver quais produtos têm o maior índice relativo previsto.",
+}
+_MSG_ORIENTACAO_M2: dict[str, str] = {
+    "Cidades": "Clique em um município no mapa para ver os produtos mais propensos.",
+    "Estados": "Clique em um estado no mapa para ver os produtos mais propensos.",
+    "Regiões": "Clique em uma região no mapa para ver os produtos mais propensos.",
+}
+
+
 def _ao_clicar_mapa() -> None:
-    """Callback do clique: grava o município pelo ``codigo_ibge`` (nunca pelo nome)."""
-    estado = st.session_state.get("m2_mapa")
+    """Callback do clique no mapa do Modo 2 (Cidades, Estados ou Regiões)."""
+    nivel = st.session_state.get("m2_nivel_ativo", config.NIVEIS_M2[0])
+    chave_mapa = _CHAVE_MAPA_M2.get(nivel, "m2_mapa_cidades")
+    estado = st.session_state.get(chave_mapa) or st.session_state.get("m2_mapa")
     pontos = []
     try:
         pontos = estado["selection"]["points"]
@@ -457,27 +497,68 @@ def _ao_clicar_mapa() -> None:
         pontos = []
     if not pontos:  # clique em área vazia ou desseleção: mantém a seleção anterior
         return
-    codigo = geo.codigo_do_ponto(pontos[-1], st.session_state.get("m2_curvas"))
-    if codigo:
-        st.session_state["m2_codigo_ibge"] = codigo
+    chave = geo.codigo_do_ponto(pontos[-1], st.session_state.get("m2_curvas"))
+    if not chave:
+        return
+    if nivel == "Cidades":
+        st.session_state.pop("m2_aviso_sem_historico", None)
+        st.session_state["m2_codigo_ibge"] = chave
         st.session_state["m2_painel"] = "municipio"
+        return
+    res = geo.area_do_clique(nivel, chave, recurso_refs().municipios)
+    if res is None:
+        st.session_state["m2_aviso_sem_historico"] = chave
+        return
+    st.session_state.pop("m2_aviso_sem_historico", None)
+    reg_base, uf_base = res
+    definir("m2_regiao", reg_base)
+    definir("m2_uf", uf_base if uf_base else "(Todos)")
+    st.session_state["m2_painel"] = "area"
 
 
 def _ao_mudar_area(wkey: str, pkey: str) -> None:
-    """Callback dos seletores de região/estado: mostra o ranking agregado da área."""
+    """Callback dos seletores de região/estado: reenquadra o mapa e mostra o ranking agregado."""
     _copiar(wkey, pkey)
     if pkey == "m2_regiao":  # trocar a região limpa o estado
         definir("m2_uf", "(Todos)")
-    tem_area = st.session_state.get("m2_regiao", "(Brasil)") != "(Brasil)" or st.session_state.get("m2_uf", "(Todos)") != "(Todos)"
-    st.session_state["m2_painel"] = "area" if tem_area else "municipio"
+    st.session_state.pop("m2_aviso_sem_historico", None)
+    reg = st.session_state.get("m2_regiao", "(Brasil)")
+    uf = st.session_state.get("m2_uf", "(Todos)")
+    area_reg = None if reg == "(Brasil)" else reg
+    area_uf = None if uf == "(Todos)" else uf
+    st.session_state["m2_enquadramento"] = (area_reg, area_uf)
+    st.session_state["m2_painel"] = "area" if (area_reg or area_uf) else "municipio"
+
+
+def _ao_mudar_nivel() -> None:
+    """Callback do seletor de nível: limpa seleção/área ou restaura o último nível se None."""
+    novo = st.session_state.get("m2_nivel")
+    if novo is None:
+        st.session_state["m2_nivel"] = st.session_state.get("m2_nivel_ativo", config.NIVEIS_M2[0])
+        return
+    if novo != st.session_state.get("m2_nivel_ativo"):
+        st.session_state["m2_nivel_ativo"] = novo
+        st.session_state.pop("m2_codigo_ibge", None)
+        st.session_state.pop("m2_aviso_sem_historico", None)
+        definir("m2_regiao", "(Brasil)")
+        definir("m2_uf", "(Todos)")
+        st.session_state["m2_enquadramento"] = (None, None)
+        st.session_state["m2_painel"] = "municipio"
 
 
 def modo_o_que_produzir(refs: mu.Referencias) -> None:
-    """Clique em um município -> ranking dos produtos pelo índice relativo."""
+    """Clique em município, estado ou região -> ranking dos produtos pelo índice relativo."""
+    st.session_state.setdefault("m2_nivel_ativo", config.NIVEIS_M2[0])
+    if st.session_state.get("m2_nivel") not in config.NIVEIS_M2:
+        st.session_state["m2_nivel"] = st.session_state["m2_nivel_ativo"]
+    nivel = st.session_state["m2_nivel"]
+    st.session_state["m2_nivel_ativo"] = nivel
+
     st.subheader(":green[:material/location_on:] O que produzir?")
-    st.write("Clique em um município no mapa para ver quais produtos têm o maior índice relativo previsto.")
+    st.write(_TEXTO_TOPO_M2[nivel])
     notas_fixas()
     st.session_state.setdefault("m2_painel", "municipio")
+    st.session_state.setdefault("m2_enquadramento", (None, None))
 
     with st.expander("Controles", expanded=False):
         ajustes_t = controles_ajustes("m2")
@@ -495,29 +576,45 @@ def modo_o_que_produzir(refs: mu.Referencias) -> None:
         kw["on_change"] = _ao_mudar_area
         uf = c2.selectbox("Estado", ufs, format_func=lambda u: u if u.startswith("(") else f"{u} — {nomes_uf.get(u, u)}", **kw)
 
+    st.segmented_control("Nível do mapa", config.NIVEIS_M2, key="m2_nivel", on_change=_ao_mudar_nivel)
+
     area_reg = None if regiao == "(Brasil)" else regiao
     area_uf = None if uf == "(Todos)" else uf
     tem_area = bool(area_reg or area_uf)
     codigo = st.session_state.get("m2_codigo_ibge")
+    enquadramento = st.session_state.get("m2_enquadramento", (None, None))
+
+    if nivel == "Cidades":
+        selecionado = codigo
+    elif nivel == "Estados":
+        selecionado = area_uf
+    else:
+        selecionado = area_reg if area_uf is None else None
 
     col_mapa, col_res = st.columns([3, 2])
     with col_mapa:
-        fig, curvas = cache_figura_selecao(codigo, (area_reg, area_uf))
+        fig, curvas = cache_figura_selecao(nivel, selecionado, enquadramento)
         st.session_state["m2_curvas"] = curvas
         st.plotly_chart(
-            fig, width="stretch", key="m2_mapa", on_select=_ao_clicar_mapa, selection_mode="points",
+            fig, width="stretch", key=_CHAVE_MAPA_M2[nivel], on_select=_ao_clicar_mapa, selection_mode="points",
             config={"scrollZoom": True, "displaylogo": False, "modeBarButtonsToRemove": ["lasso2d", "select2d"]},
         )
-        st.caption("Use a roda do mouse para aproximar e arraste para mover. O município selecionado fica destacado em verde escuro.")
+        st.caption(
+            "Use a roda do mouse para aproximar e arraste para mover. "
+            "As cores identificam apenas as regiões (não representam previsão); o item selecionado recebe contorno escuro."
+        )
 
     with col_res:
+        aviso_sem_hist = st.session_state.get("m2_aviso_sem_historico")
+        if aviso_sem_hist:
+            st.warning(f"'{aviso_sem_hist}' está sem histórico de produção na base.", icon=":material/warning:")
         painel = st.session_state["m2_painel"]
         if painel == "area" and tem_area:
             _painel_area(refs, area_reg, area_uf, ajustes_t, codigo)
         elif codigo:
             _painel_municipio(refs, codigo, ajustes_t, tem_area)
         else:
-            st.info("Clique em um município no mapa para ver os produtos mais propensos.", icon=":material/ads_click:")
+            st.info(_MSG_ORIENTACAO_M2[nivel], icon=":material/ads_click:")
 
     with st.expander("O que é o índice relativo?"):
         st.markdown(texto_explicacao_indice())

@@ -320,6 +320,135 @@ def processar_malha(geo: dict) -> dict:
     return saida
 
 
+# ---------------------------------------------------------------------------
+# Estados e regiões (dissolução da malha municipal com shapely)
+# ---------------------------------------------------------------------------
+def _poligonos(g) -> list:
+    """Extrai os polígonos de qualquer geometria (make_valid pode devolver coleções)."""
+    from shapely.geometry import MultiPolygon, Polygon
+
+    if isinstance(g, Polygon):
+        return [g] if not g.is_empty else []
+    if isinstance(g, MultiPolygon):
+        return [p for p in g.geoms if not p.is_empty]
+    if hasattr(g, "geoms"):
+        return [p for sub in g.geoms for p in _poligonos(sub)]
+    return []
+
+
+def _limpar_geometria(g, simplificar: bool):
+    """make_valid/buffer(0), fecha frestas, remove furos minúsculos e (se pedido) simplifica."""
+    from shapely import make_valid, set_precision
+    from shapely.geometry import MultiPolygon, Polygon
+
+    eps = config.MALHA_BUFFER_FECHAMENTO
+    g = make_valid(g).buffer(0)
+    g = g.buffer(eps, join_style="mitre").buffer(-eps, join_style="mitre")
+    polys = [
+        Polygon(p.exterior, [i for i in p.interiors if Polygon(i).area >= config.MALHA_AREA_MIN_FURO])
+        for p in _poligonos(g)
+    ]
+    g = MultiPolygon(polys) if len(polys) > 1 else polys[0]
+    if simplificar:
+        g = g.simplify(config.MALHA_TOLERANCIA_SIMPLIFICACAO, preserve_topology=True)
+    g = make_valid(set_precision(g, 1e-4))
+    polys = _poligonos(g)
+    return MultiPolygon(polys) if len(polys) > 1 else polys[0]
+
+
+def _feature(geom, props: dict) -> dict:
+    from shapely.geometry import mapping
+
+    return {"type": "Feature", "properties": props, "geometry": json.loads(json.dumps(mapping(geom)))}
+
+
+def _tamanho_mb(fc: dict) -> float:
+    return len(json.dumps(fc, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) / 1e6
+
+
+def regiao_por_uf(municipios: pd.DataFrame, ibge: pd.DataFrame) -> dict[str, str]:
+    """Região de cada UF: grafia da base; ``regiao_ibge`` apenas para UFs ausentes da base."""
+    por_uf = municipios.groupby("uf")["regiao"].unique()
+    ambiguas = por_uf[por_uf.map(len) > 1]
+    if not ambiguas.empty:
+        falhar(f"UFs com mais de uma região na base: {ambiguas.to_dict()}")
+    mapa = {uf: v[0] for uf, v in por_uf.items()}
+    for uf, reg in ibge.drop_duplicates("uf").set_index("uf")["regiao_ibge"].items():
+        mapa.setdefault(uf, reg)
+    return mapa
+
+
+def montar_estados_regioes(malha: dict, ibge: pd.DataFrame, reg_uf: dict[str, str]) -> tuple[dict, dict]:
+    """Dissolve municípios -> 27 estados -> 5 regiões, valida e registra no relatório."""
+    from shapely import unary_union
+    from shapely.geometry import shape
+
+    uf_por_cod = ibge.set_index("codigo_ibge")["uf"].to_dict()
+    nome_uf = ibge.drop_duplicates("uf").set_index("uf")["estado_nome"].to_dict()
+    geoms_uf: dict[str, list] = {}
+    sem_uf = []
+    for ft in malha["features"]:
+        cod = ft["properties"]["codigo_ibge"]
+        uf = uf_por_cod.get(cod)
+        if uf is None:
+            sem_uf.append(cod)
+            continue
+        geoms_uf.setdefault(uf, []).append(shape(ft["geometry"]))
+    if sem_uf:
+        falhar(f"Feições da malha sem UF na tabela do IBGE: {sem_uf[:10]}")
+
+    def _gerar(simplificar: bool) -> tuple[dict, dict]:
+        estados_geom = {uf: _limpar_geometria(unary_union(gs), simplificar) for uf, gs in sorted(geoms_uf.items())}
+        estados = {
+            "type": "FeatureCollection",
+            "features": [
+                _feature(g, {"uf": uf, "estado_nome": nome_uf[uf], "regiao": reg_uf[uf]})
+                for uf, g in estados_geom.items()
+            ],
+        }
+        por_regiao: dict[str, list] = {}
+        for uf, g in estados_geom.items():
+            por_regiao.setdefault(reg_uf[uf], []).append(g)
+        regioes = {
+            "type": "FeatureCollection",
+            "features": [
+                _feature(_limpar_geometria(unary_union(gs), simplificar), {"regiao": reg})
+                for reg, gs in sorted(por_regiao.items())
+            ],
+        }
+        return estados, regioes
+
+    estados, regioes = _gerar(simplificar=False)
+    if _tamanho_mb(estados) + _tamanho_mb(regioes) > config.MALHA_AGREGADA_MAX_MB:
+        log(f"Estados/regiões acima de {config.MALHA_AGREGADA_MAX_MB} MB: simplificando "
+            f"(tolerância {config.MALHA_TOLERANCIA_SIMPLIFICACAO}).")
+        estados, regioes = _gerar(simplificar=True)
+
+    # Validação
+    log("\n== Estados e regiões (dissolvidos da malha municipal) ==")
+    ufs = [f["properties"]["uf"] for f in estados["features"]]
+    regs = [f["properties"]["regiao"] for f in regioes["features"]]
+    ufs_ibge = set(ibge["uf"])
+    if len(ufs) != 27 or set(ufs) != ufs_ibge:
+        falhar(f"Esperados 27 estados; obtidos {len(ufs)}. Diferença com o IBGE: {sorted(set(ufs) ^ ufs_ibge)}")
+    if len(regs) != 5:
+        falhar(f"Esperadas 5 regiões; obtidas {len(regs)}: {regs}")
+    sem_cor = [r for r in regs if normalizar_nome(r) not in config.CORES_REGIOES]
+    if sem_cor:
+        falhar(f"Regiões sem cor em config.CORES_REGIOES: {sem_cor}")
+    regioes_base = set(reg_uf.values())
+    if set(regs) != regioes_base:
+        falhar(f"Regiões sem correspondência: {sorted(set(regs) ^ regioes_base)}")
+    for fc, nome in ((estados, "estado"), (regioes, "região")):
+        for f in fc["features"]:
+            g = shape(f["geometry"])
+            if g.is_empty or not g.is_valid:
+                falhar(f"Geometria inválida/vazia para {nome} {f['properties']}")
+    log(f"Estados: {len(ufs)} (todas as UFs do IBGE com geometria e região) | {_tamanho_mb(estados):.2f} MB")
+    log(f"Regiões: {len(regs)} {regs} | {_tamanho_mb(regioes):.2f} MB")
+    return estados, regioes
+
+
 def comparar_categorias_modelo(categorias: dict[str, list[str]]) -> None:
     """Se o modelo gravar categorias (xgboost >= 3.1), compara com as da base e salva .ubj.gz."""
     try:
@@ -394,6 +523,7 @@ def main() -> None:
     config.ARQ_MALHA.write_text(json.dumps(malha, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
 
     # Nomes de todas as feições da malha (para tooltip), priorizando a grafia da base.
+    reg_uf = regiao_por_uf(municipios, ibge)
     nomes = pd.DataFrame({"codigo_ibge": sorted(cod_malha)}).merge(
         ibge[["codigo_ibge", "nome_ibge", "uf", "regiao_ibge"]], on="codigo_ibge", how="left"
     )
@@ -401,9 +531,15 @@ def main() -> None:
     base_nomes = municipios.set_index("codigo_ibge")["nome_exibicao"]
     nomes.loc[nomes["codigo_ibge"].isin(base_nomes.index), "nome_exibicao"] = nomes["codigo_ibge"].map(base_nomes)
     nomes["na_base"] = nomes["codigo_ibge"].isin(base_nomes.index)
-    nomes[["codigo_ibge", "nome_exibicao", "uf", "regiao_ibge", "na_base"]].to_csv(
+    # Região de cada feição (grafia da base, via UF), cobrindo também os municípios sem histórico.
+    nomes["regiao"] = nomes["uf"].map(reg_uf).fillna(nomes["regiao_ibge"])
+    nomes[["codigo_ibge", "nome_exibicao", "uf", "regiao", "regiao_ibge", "na_base"]].to_csv(
         config.ARQ_NOMES_MALHA, index=False, encoding="utf-8"
     )
+
+    estados, regioes = montar_estados_regioes(malha, ibge, reg_uf)
+    config.ARQ_MALHA_ESTADOS.write_text(json.dumps(estados, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    config.ARQ_MALHA_REGIOES.write_text(json.dumps(regioes, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
 
     log(f"\nArquivos gravados em {config.DIR_REF}")
     Path(config.ARQ_RELATORIO).write_text("\n".join(LINHAS_RELATORIO), encoding="utf-8")

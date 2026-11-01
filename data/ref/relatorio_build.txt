@@ -30,4 +30,8 @@ Categorias de 'cidade': base=5273 modelo=5273 -> IGUAIS
 Categorias de 'tipo_lavoura': base=2 modelo=2 -> IGUAIS
 Categorias de 'produto': base=57 modelo=57 -> IGUAIS
 
+== Estados e regiões (dissolvidos da malha municipal) ==
+Estados: 27 (todas as UFs do IBGE com geometria e região) | 0.25 MB
+Regiões: 5 ['Centro-Oeste', 'Nordeste', 'Norte', 'Sudeste', 'Sul'] | 0.13 MB
+
 Arquivos gravados em C:\Users\nicolas\Documents\FATEC\PI\projeto_agroclima\data\ref

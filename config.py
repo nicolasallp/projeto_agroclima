@@ -35,6 +35,8 @@ ARQ_REF_VALORES: Path = DIR_REF / "referencia_valores.parquet"
 ARQ_CATEGORIAS: Path = DIR_REF / "categorias.json"
 ARQ_FAIXAS_CLIMA: Path = DIR_REF / "faixas_clima.json"
 ARQ_MALHA: Path = DIR_REF / "malha_municipios.geojson"
+ARQ_MALHA_ESTADOS: Path = DIR_REF / "malha_estados.geojson"  # 27 UFs (dissolvidas da malha municipal)
+ARQ_MALHA_REGIOES: Path = DIR_REF / "malha_regioes.geojson"  # 5 regiões (dissolvidas dos estados)
 ARQ_NOMES_MALHA: Path = DIR_REF / "nomes_malha.csv"  # nome/UF de todas as feições (inclusive sem histórico)
 ARQ_RELATORIO: Path = DIR_REF / "relatorio_build.txt"
 
@@ -50,6 +52,10 @@ QUALIDADES_MALHA: tuple[str, ...] = ("minima", "1", "intermediaria")
 MALHA_N_ESPERADO: int = 5570
 MALHA_TOLERANCIA_SIMPLIFICACAO: float = 0.005  # graus (~500 m); só usada se a malha vier pesada
 MALHA_TAMANHO_MAX_MB: float = 8.0
+# Dissolução de estados/regiões (build_reference.py)
+MALHA_BUFFER_FECHAMENTO: float = 0.002  # graus (~200 m): buffer(+eps).buffer(-eps) fecha frestas entre municípios
+MALHA_AREA_MIN_FURO: float = 1e-3  # graus²: furos menores são frestas (o DF, furo real em GO, tem ~0,5)
+MALHA_AGREGADA_MAX_MB: float = 1.5  # acima disso, estados/regiões são simplificados
 
 # ---------------------------------------------------------------------------
 # Modelo
@@ -131,6 +137,18 @@ FORMATO_CLIMA: dict[str, tuple[float, str]] = {
 }
 
 MODOS: list[str] = ["Onde produzir?", "O que produzir?", "Qual será o rendimento?"]
+
+# Modo 2: nível do mapa e cores fixas por região (paleta Okabe-Ito, segura para daltônicos).
+# As chaves são o nome NORMALIZADO (geo_utils.normalizar_nome), pois a grafia da base pode diferir da do IBGE.
+NIVEIS_M2: list[str] = ["Cidades", "Estados", "Regiões"]
+CORES_REGIOES: dict[str, str] = {
+    "norte": "#009E73",
+    "nordeste": "#E69F00",
+    "centro oeste": "#F0E442",
+    "sudeste": "#0072B2",
+    "sul": "#CC79A7",
+}
+COR_SEM_REGIAO: str = "#bdbdbd"
 NOTA_ANO: str = f"Estimativa nas condições do período mais recente da base ({ANO_REFERENCIA})."
 NOTA_ESTIMATIVA: str = (
     "O valor exibido é uma estimativa típica (próxima da mediana) e tende a ficar "

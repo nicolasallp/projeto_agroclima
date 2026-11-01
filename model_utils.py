@@ -98,7 +98,7 @@ def carregar_referencias() -> Referencias:
         for p in (
             config.ARQ_MUNICIPIOS, config.ARQ_PRODUTOS, config.ARQ_CLIMA_BASE, config.ARQ_COMBINACOES,
             config.ARQ_REF_PRODUTO, config.ARQ_REF_VALORES, config.ARQ_CATEGORIAS, config.ARQ_FAIXAS_CLIMA,
-            config.ARQ_MALHA, config.ARQ_NOMES_MALHA,
+            config.ARQ_MALHA, config.ARQ_NOMES_MALHA, config.ARQ_MALHA_ESTADOS, config.ARQ_MALHA_REGIOES,
         )
         if not p.exists()
     ]

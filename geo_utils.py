@@ -58,10 +58,13 @@ def carregar_malha(caminho=config.ARQ_MALHA) -> dict:
         return json.load(f)
 
 
-def subconjunto_malha(malha: dict, codigos: Iterable[str]) -> dict:
-    """Retorna um FeatureCollection apenas com os municípios pedidos (sem copiar geometrias)."""
+def subconjunto_malha(malha: dict, codigos: Iterable[str], prop: str = "codigo_ibge") -> dict:
+    """Retorna um FeatureCollection apenas com as feições pedidas (sem copiar geometrias).
+
+    ``prop`` é a propriedade-chave: ``codigo_ibge`` (municípios), ``uf`` (estados) ou ``regiao``.
+    """
     alvo = set(codigos)
-    feats = [ft for ft in malha["features"] if ft["properties"]["codigo_ibge"] in alvo]
+    feats = [ft for ft in malha["features"] if ft["properties"][prop] in alvo]
     return {"type": "FeatureCollection", "features": feats}
 
 
@@ -124,16 +127,36 @@ def codigo_do_ponto(ponto: dict, codigos_por_curva: Sequence[Sequence[str]] | No
     return None
 
 
+def area_do_clique(nivel: str, chave: str, municipios: pd.DataFrame) -> tuple[str, str | None] | None:
+    """Traduz o clique em estado/região para (região, UF) com a grafia da base.
+
+    ``municipios`` é a tabela de municípios com histórico (colunas ``uf`` e ``regiao``).
+    Retorna ``None`` se a área clicada não tiver nenhum município na base.
+    Em "Regiões", a UF devolvida é ``None`` (nenhum estado).
+    """
+    if nivel == "Estados":
+        linhas = municipios.loc[municipios["uf"] == chave, "regiao"]
+        return None if linhas.empty else (str(linhas.iloc[0]), str(chave))
+    if nivel == "Regiões":
+        return (str(chave), None) if (municipios["regiao"] == chave).any() else None
+    raise ValueError(f"Nível sem seleção de área: {nivel}")
+
+
 # ---------------------------------------------------------------------------
 # Figuras
 # ---------------------------------------------------------------------------
-def _layout(fig: go.Figure, centro: dict, zoom: float, uirevision: str, altura: int) -> go.Figure:
+def _layout(
+    fig: go.Figure, centro: dict, zoom: float, uirevision: str, altura: int, legenda_fixa: bool = False
+) -> go.Figure:
+    legenda = dict(yanchor="bottom", y=0.01, xanchor="left", x=0.01, bgcolor="rgba(255,255,255,0.8)")
+    if legenda_fixa:  # clique na legenda não oculta traços
+        legenda.update(itemclick=False, itemdoubleclick=False, title=dict(text="Região"))
     fig.update_layout(
         map=dict(style=config.ESTILO_MAPA, center=centro, zoom=zoom),
         margin=dict(l=0, r=0, t=0, b=0),
         height=altura,
         uirevision=uirevision,
-        legend=dict(yanchor="bottom", y=0.01, xanchor="left", x=0.01, bgcolor="rgba(255,255,255,0.8)"),
+        legend=legenda,
         clickmode="event+select",
     )
     return fig
@@ -206,6 +229,101 @@ def figura_mapa_predicao(
     return _layout(fig, dict(config.CENTRO_BRASIL), config.ZOOM_BRASIL, "mapa-modo1", altura)
 
 
+def cor_regiao(regiao: Any) -> str:
+    """Cor fixa da região (``config.CORES_REGIOES``, chaveado pelo nome normalizado)."""
+    return config.CORES_REGIOES.get(normalizar_nome(regiao), config.COR_SEM_REGIAO)
+
+
+def _ordem_regiao(regiao: Any) -> int:
+    ordem = list(config.CORES_REGIOES)
+    n = normalizar_nome(regiao)
+    return ordem.index(n) if n in ordem else len(ordem)
+
+
+# (largura do contorno das feições comuns, largura do contorno do selecionado)
+_CONTORNOS = {"codigo_ibge": (0.3, 2.5), "uf": (0.8, 3.5), "regiao": (1.0, 4.0)}
+_OPACIDADE_BASE = 0.6
+
+
+def _figura_por_regiao(
+    geojson: dict,
+    prop: str,
+    itens: pd.DataFrame,
+    selecionado: str | None,
+    centro: dict,
+    zoom: float,
+    uirevision: str,
+    altura: int,
+) -> tuple[go.Figure, list[list[str]]]:
+    """Mapa do Modo 2 colorido por região: um traço por região + um traço do selecionado.
+
+    ``itens`` tem ``chave`` (valor de ``properties.<prop>``), ``rotulo`` (tooltip) e ``regiao``.
+    O ``customdata[0]`` de cada ponto é a ``chave``. Retorna também a lista de chaves de cada
+    traço, na ORDEM EXATA dos traços (fallback de ``codigo_do_ponto`` por ``point_index``).
+    A cor não representa previsão.
+    """
+    presentes = {ft["properties"][prop] for ft in geojson["features"]}
+    itens = itens[itens["chave"].isin(presentes)]
+    if selecionado not in presentes:
+        selecionado = None
+    linha_base, linha_sel = _CONTORNOS[prop]
+    featureidkey = f"properties.{prop}"
+    fig = go.Figure()
+    curvas: list[list[str]] = []
+    regioes_com_traco = set()
+
+    for regiao in sorted(itens["regiao"].unique(), key=_ordem_regiao):
+        grupo = itens[(itens["regiao"] == regiao) & (itens["chave"] != selecionado)]
+        if grupo.empty:
+            continue
+        cor = cor_regiao(regiao)
+        chaves = grupo["chave"].tolist()
+        fig.add_trace(
+            go.Choroplethmap(
+                geojson=subconjunto_malha(geojson, chaves, prop),
+                featureidkey=featureidkey,
+                locations=chaves,
+                z=np.zeros(len(chaves)),
+                colorscale=[[0, cor], [1, cor]],
+                showscale=False,
+                marker=dict(line=dict(width=linha_base, color="#ffffff"), opacity=_OPACIDADE_BASE),
+                selected=dict(marker=dict(opacity=_OPACIDADE_BASE)),
+                unselected=dict(marker=dict(opacity=_OPACIDADE_BASE)),
+                customdata=grupo[["chave", "rotulo"]].to_numpy(dtype=object),
+                hovertemplate="%{customdata[1]}<extra></extra>",
+                name=str(regiao),
+                legendrank=_ordem_regiao(regiao),
+                showlegend=True,
+            )
+        )
+        curvas.append(chaves)
+        regioes_com_traco.add(regiao)
+
+    if selecionado is not None:
+        sel = itens[itens["chave"] == selecionado].iloc[0]
+        fig.add_trace(
+            go.Choroplethmap(
+                geojson=subconjunto_malha(geojson, [selecionado], prop),
+                featureidkey=featureidkey,
+                locations=[selecionado],
+                z=[1.0],
+                colorscale=[[0, cor_regiao(sel["regiao"])], [1, cor_regiao(sel["regiao"])]],
+                showscale=False,
+                marker=dict(line=dict(width=linha_sel, color="#111111"), opacity=1.0),
+                selected=dict(marker=dict(opacity=1.0)),
+                unselected=dict(marker=dict(opacity=1.0)),
+                customdata=np.array([[selecionado, sel["rotulo"]]], dtype=object),
+                hovertemplate="<b>%{customdata[1]}</b> (selecionado)<extra></extra>",
+                name=str(sel["regiao"]),
+                legendrank=_ordem_regiao(sel["regiao"]),
+                # Se a região só tem o selecionado (nível Regiões), este traço representa a região na legenda.
+                showlegend=sel["regiao"] not in regioes_com_traco,
+            )
+        )
+        curvas.append([selecionado])
+    return _layout(fig, centro, zoom, uirevision, altura, legenda_fixa=True), curvas
+
+
 def figura_mapa_selecao(
     malha: dict,
     municipios: pd.DataFrame,
@@ -215,51 +333,37 @@ def figura_mapa_selecao(
     uirevision: str,
     altura: int = 620,
 ) -> tuple[go.Figure, list[list[str]]]:
-    """Mapa neutro do Modo 2, com o município selecionado destacado.
+    """Modo 2, nível "Cidades": municípios coloridos por região, com o selecionado destacado.
 
-    Retorna a figura e a lista de códigos de cada curva (para traduzir
-    ``point_index`` em ``codigo_ibge`` caso o ``customdata`` não venha no evento).
-    ``municipios`` deve ter ``codigo_ibge`` e ``nome_exibicao`` para TODAS as feições da malha.
+    ``municipios`` deve ter ``codigo_ibge``, ``nome_exibicao`` e ``regiao`` para TODAS as
+    feições da malha (``nomes_malha.csv``, que cobre também os municípios sem histórico).
     """
-    codigos = [ft["properties"]["codigo_ibge"] for ft in malha["features"]]
-    nomes = municipios.set_index("codigo_ibge")["nome_exibicao"].to_dict()
-    base = [c for c in codigos if c != codigo_selecionado]
-    fig = go.Figure()
-    fig.add_trace(
-        go.Choroplethmap(
-            geojson=subconjunto_malha(malha, base) if codigo_selecionado else malha,
-            featureidkey="properties.codigo_ibge",
-            locations=base,
-            z=np.zeros(len(base)),
-            colorscale=[[0, "#cfe3c8"], [1, "#cfe3c8"]],
-            showscale=False,
-            marker=dict(line=dict(width=0.3, color="#7f9c76"), opacity=0.85),
-            selected=dict(marker=dict(opacity=0.85)),
-            unselected=dict(marker=dict(opacity=0.85)),
-            customdata=np.array([[c, nomes.get(c, c)] for c in base], dtype=object),
-            hovertemplate="%{customdata[1]}<extra></extra>",
-            name="Municípios",
-            showlegend=False,
-        )
+    col_reg = "regiao" if "regiao" in municipios.columns else "regiao_ibge"
+    itens = pd.DataFrame(
+        {"chave": municipios["codigo_ibge"], "rotulo": municipios["nome_exibicao"], "regiao": municipios[col_reg]}
     )
-    curvas = [base]
-    if codigo_selecionado:
-        fig.add_trace(
-            go.Choroplethmap(
-                geojson=subconjunto_malha(malha, [codigo_selecionado]),
-                featureidkey="properties.codigo_ibge",
-                locations=[codigo_selecionado],
-                z=[1.0],
-                colorscale=[[0, "#1b5e20"], [1, "#1b5e20"]],
-                showscale=False,
-                marker=dict(line=dict(width=2.5, color="#0a2e0d"), opacity=1.0),
-                selected=dict(marker=dict(opacity=1.0)),
-                unselected=dict(marker=dict(opacity=1.0)),
-                customdata=np.array([[codigo_selecionado, nomes.get(codigo_selecionado, "")]], dtype=object),
-                hovertemplate="<b>%{customdata[1]}</b> (selecionado)<extra></extra>",
-                name="Selecionado",
-                showlegend=False,
-            )
-        )
-        curvas.append([codigo_selecionado])
-    return _layout(fig, centro, zoom, uirevision, altura), curvas
+    return _figura_por_regiao(malha, "codigo_ibge", itens, codigo_selecionado, centro, zoom, uirevision, altura)
+
+
+def figura_mapa_estados(
+    malha_estados: dict, uf_selecionada: str | None, centro: dict, zoom: float, uirevision: str, altura: int = 620
+) -> tuple[go.Figure, list[list[str]]]:
+    """Modo 2, nível "Estados": apenas os 27 polígonos de UF (nenhum município desenhado)."""
+    props = pd.DataFrame([ft["properties"] for ft in malha_estados["features"]])
+    itens = pd.DataFrame(
+        {
+            "chave": props["uf"],
+            "rotulo": props["estado_nome"] + " (" + props["uf"] + ")<br>Região " + props["regiao"],
+            "regiao": props["regiao"],
+        }
+    )
+    return _figura_por_regiao(malha_estados, "uf", itens, uf_selecionada, centro, zoom, uirevision, altura)
+
+
+def figura_mapa_regioes(
+    malha_regioes: dict, regiao_selecionada: str | None, centro: dict, zoom: float, uirevision: str, altura: int = 620
+) -> tuple[go.Figure, list[list[str]]]:
+    """Modo 2, nível "Regiões": apenas os 5 polígonos de região (nenhum município desenhado)."""
+    props = pd.DataFrame([ft["properties"] for ft in malha_regioes["features"]])
+    itens = pd.DataFrame({"chave": props["regiao"], "rotulo": "Região " + props["regiao"], "regiao": props["regiao"]})
+    return _figura_por_regiao(malha_regioes, "regiao", itens, regiao_selecionada, centro, zoom, uirevision, altura)

@@ -88,3 +88,83 @@ def test_modo2_painel_municipio_via_estado():
     at.run()
     assert not at.exception
     assert any("Município: São Paulo" in m.value for m in at.markdown)
+
+
+def test_modo2_troca_de_nivel_limpa_selecao_e_mostra_mensagem():
+    at = _rodar_modo(config.MODOS[1])
+    at.session_state["m2_codigo_ibge"] = "3550308"
+    at.run()
+    assert any("Município: São Paulo" in m.value for m in at.markdown)
+
+    # Troca para Estados: limpa seleção e mostra mensagem do nível Estados
+    at.segmented_control(key="m2_nivel").set_value("Estados").run()
+    assert not at.exception
+    assert "m2_codigo_ibge" not in at.session_state
+    assert at.session_state["m2_regiao"] == "(Brasil)"
+    assert at.session_state["m2_uf"] == "(Todos)"
+    assert any("Clique em um estado no mapa" in i.value for i in at.info)
+
+    # Troca para Regiões: mostra mensagem do nível Regiões
+    at.segmented_control(key="m2_nivel").set_value("Regiões").run()
+    assert not at.exception
+    assert any("Clique em uma região no mapa" in i.value for i in at.info)
+
+
+def test_modo2_clique_estado_e_regiao_igual_ao_dropdown_sem_reenquadrar():
+    at = _rodar_modo(config.MODOS[1])
+    at.segmented_control(key="m2_nivel").set_value("Estados").run()
+    assert not at.exception
+
+    for uf_alvo, reg_esperada in (("PA", "Norte"), ("DF", "Centro-Oeste")):
+        at.session_state["m2_enquadramento"] = (None, None)
+        at.session_state["m2_regiao"] = reg_esperada
+        at.session_state["m2_uf"] = uf_alvo
+        at.session_state["m2_painel"] = "area"
+        at.run()
+        assert not at.exception
+        assert at.session_state["m2_enquadramento"] == (None, None)
+        assert at.selectbox(key="_w_m2_regiao").value == reg_esperada
+        assert at.selectbox(key="_w_m2_uf").value == uf_alvo
+        df_clique = at.dataframe[0].value.copy()
+
+        # Limpa para "(Brasil)" e seleciona a mesma área pelos dropdowns (que reenquadram o mapa)
+        at.selectbox(key="_w_m2_regiao").set_value("(Brasil)").run()
+        at.selectbox(key="_w_m2_regiao").set_value(reg_esperada).run()
+        at.selectbox(key="_w_m2_uf").set_value(uf_alvo).run()
+        assert at.session_state["m2_enquadramento"] == (reg_esperada, uf_alvo)
+        df_dropdown = at.dataframe[0].value.copy()
+        assert df_clique.equals(df_dropdown)
+        at.selectbox(key="_w_m2_regiao").set_value("(Brasil)").run()
+
+
+def test_callback_ao_clicar_mapa_estados_e_regioes(monkeypatch):
+    import streamlit as st
+
+    ns: dict = {}
+    exec(compile(Path(APP).read_text(encoding="utf-8").replace("\nmain()\n", "\n"), APP, "exec"), ns)
+
+    fake_state = {
+        "m2_nivel_ativo": "Estados",
+        "m2_enquadramento": (None, None),
+        "m2_mapa_estados": {"selection": {"points": [{"customdata": ["PA", "Pará (PA)"]}]}},
+    }
+    monkeypatch.setattr(st, "session_state", fake_state)
+    ns["_ao_clicar_mapa"]()
+    assert fake_state["m2_regiao"] == "Norte"
+    assert fake_state["m2_uf"] == "PA"
+    assert fake_state["m2_painel"] == "area"
+    assert fake_state["m2_enquadramento"] == (None, None)
+
+    fake_state["m2_mapa_estados"] = {"selection": {"points": [{"customdata": ["DF", "Distrito Federal (DF)"]}]}}
+    ns["_ao_clicar_mapa"]()
+    assert fake_state["m2_regiao"] == "Centro-Oeste"
+    assert fake_state["m2_uf"] == "DF"
+    assert fake_state["m2_enquadramento"] == (None, None)
+
+    fake_state["m2_nivel_ativo"] = "Regiões"
+    fake_state["m2_mapa_regioes"] = {"selection": {"points": [{"customdata": ["Sul", "Região Sul"]}]}}
+    ns["_ao_clicar_mapa"]()
+    assert fake_state["m2_regiao"] == "Sul"
+    assert fake_state["m2_uf"] == "(Todos)"
+    assert fake_state["m2_painel"] == "area"
+    assert fake_state["m2_enquadramento"] == (None, None)
